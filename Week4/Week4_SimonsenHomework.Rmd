@@ -1,0 +1,179 @@
+---
+title: "Week4_SimonsenHomework"
+author: "Steven Simonsen"
+date: "2024-09-22"
+output: pdf_document
+---
+
+```{r}
+library(dplyr)
+library(caret)
+setwd("C:\\Users\\steve\\OneDrive\\Documents\\School\\DSE6211\\Week4")
+
+data <- read.csv("lab_4_data.csv")
+
+set.seed(42)
+training_ind <- createDataPartition(data$lodgepole_pine,
+                                    p = 0.75,
+                                    list = FALSE,
+                                    times = 1)
+
+training_set <- data[training_ind, ]
+test_set <- data[-training_ind, ]
+
+unique(training_set$wilderness_area)
+unique(training_set$soil_type)
+
+
+top_20_soil_types <- training_set %>%
+  group_by(soil_type) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>%
+  select(soil_type) %>%
+  top_n(20)
+
+training_set$soil_type <- ifelse(training_set$soil_type %in% top_20_soil_types$soil_type,
+                                 training_set$soil_type,
+                                 "other")
+
+training_set$wilderness_area <- factor(training_set$wilderness_area)
+training_set$soil_type <- factor(training_set$soil_type)
+
+class(training_set$wilderness_area)
+class(training_set$soil_type)
+
+levels(training_set$wilderness_area)
+levels(training_set$soil_type)
+
+onehot_encoder <- dummyVars(~ wilderness_area + soil_type,
+                            training_set[, c("wilderness_area", "soil_type")],
+                            levelsOnly = TRUE,
+                            fullRank = TRUE)
+
+
+onehot_enc_training <- predict(onehot_encoder,
+                               training_set[, c("wilderness_area", "soil_type")])
+
+
+training_set <- cbind(training_set, onehot_enc_training)
+
+
+
+test_set$soil_type <- ifelse(test_set$soil_type %in% top_20_soil_types$soil_type,
+                             test_set$soil_type,
+                             "other")
+
+
+test_set$wilderness_area <- factor(test_set$wilderness_area)
+test_set$soil_type <- factor(test_set$soil_type)
+
+onehot_enc_test <- predict(onehot_encoder, test_set[, c("wilderness_area", "soil_type")])
+
+test_set <- cbind(test_set, onehot_enc_test)
+
+test_set[, -c(11:13)] <- scale(test_set[, -c(11:13)],
+                               center = apply(training_set[, -c(11:13)], 2, mean),
+                               scale = apply(training_set[, -c(11:13)], 2, sd))
+
+training_set[, -c(11:13)] <- scale(training_set[, -c(11:13)])
+
+
+training_features <- array(data = unlist(training_set[, -c(11:13)]),
+                           dim = c(nrow(training_set), 33))
+
+training_labels <- array(data = unlist(training_set[, 13]),
+                         dim = c(nrow(training_set)))
+                         
+test_features <- array(data = unlist(test_set[, -c(11:13)]),
+                       dim = c(nrow(test_set), 33))
+
+test_labels <- array(data = unlist(test_set[, 13]),
+                     dim = c(nrow(test_set)))
+
+library(reticulate)
+library(tensorflow)
+library(keras3)
+
+use_virtualenv("my_tf_workspace")
+
+set.seed(42)
+model1 <- keras_model_sequential() %>%
+  layer_dense(units = 20, activation = "relu") %>%
+  layer_dense(units = 10, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+  
+compile(model1,
+        optimizer = "rmsprop",
+        loss = "binary_crossentropy",
+        metrics = "accuracy")
+
+set.seed(42)
+history1 <- fit(model1, training_features, training_labels,
+               epochs = 100, batch_size = 512, validation_split = 0.33)
+
+plot(history1)
+
+set.seed(42)
+predictions1 <- predict(model1, test_features)
+head(predictions1, 10)
+
+predicted_class1 <- (predictions1[, 1] >= 0.5) * 1
+head(predicted_class1, 10)
+```
+#Exercises
+
+1) Copy and paste the loss and accuracy curves obtained from running the code above (note, the curves will be slightly different than those shown in this lab).
+
+See above plot(history) graphs.
+
+
+2) Change the hidden layers to have 50 units and 25 units, respectively, and re-run the code. Copy and paste the new loss and accuracy curves.
+
+See output from the plot(history) code below.
+```{r}
+set.seed(42)
+model2 <- keras_model_sequential() %>%
+  layer_dense(units = 50, activation = "relu") %>%
+  layer_dense(units = 25, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+  
+compile(model2,
+        optimizer = "rmsprop",
+        loss = "binary_crossentropy",
+        metrics = "accuracy")
+
+set.seed(42)
+history2 <- fit(model2, training_features, training_labels,
+               epochs = 100, batch_size = 512, validation_split = 0.33)
+
+plot(history2)
+
+set.seed(42)
+predictions2 <- predict(model2, test_features)
+head(predictions2, 10)
+
+predicted_class2 <- (predictions2[, 1] >= 0.5) * 1
+head(predicted_class2, 10)
+```
+
+3) Compare the curves from 1) and 2) and discuss which architecture (i.e., number of nodes in the hidden layers) results in better performance.
+
+Comparing the curves from 1) and 2), it appears that the architecture with more nodes in the hidden layers performs slightly better in terms of accuracy. The model accuracy curves quickly climb and level off at an accuracy that appears to be around 0.65 for the validation set, on average. For the model with less nodes in the hidden layers (1), the model eventually reaches 0.65 for accuracy on the validation set, but only after more epochs, or passes through the training set have been completed. However, it should be noted that the loss curve appears better in (1), or the model with less nodes in the hidden layers, as opposed to (2). Though, neither perform as well as I would like on the validation data in terms of the loss curve. Were I to work on this further, I would want to investigate the possibility of overfitting due to this behavior. It may be worth decreasing the number of hidden layers in the model, decreasing the number of epohcs, or collecting additional data points to help the model generalize better against the validation data, or data the model has never "seen before".
+
+4) Calculate the accuracy on the test set for the models in 1) and 2). Which accuracy is better?
+
+```{r}
+set.seed(42)
+results1 <- model1 %>% evaluate(test_features, test_labels)
+results1
+
+
+results2 <- model2 %>% evaluate(test_features, test_labels)
+results2
+```
+The accuracy for model2 used in 2) is better at .754 as opposed to model1 used in 1) at .748, although they are both very close together. 
+
+
+
+
+
